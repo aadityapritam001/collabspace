@@ -1,57 +1,82 @@
 /**
- * CollabSpace theme tokens — derived directly from /app/design_guidelines.json
- * ("4 Tactile / Playful LIGHT" personality). Central place to change look & feel.
+ * CollabSpace theme — DARK NAVY + PURPLE→CYAN (matches the CollabSpace logo).
+ * The whole app runs in this cohesive dark aesthetic. Use `gradient` for hero moments.
  */
 export const colors = {
-  surface: '#FCFCFA',
-  onSurface: '#171714',
-  surface2: '#F2F2ED',
-  onSurface2: '#3A3A35',
-  surface3: '#E5E5DE',
-  surfaceInverse: '#171714',
-  onSurfaceInverse: '#FCFCFA',
-  brand: '#FF5A5F',
-  brandSoft: '#FFE1E2',
+  // Backgrounds
+  surface: '#0F0B1F',          // deep navy — main app bg
+  surface2: '#1A1533',         // elevated card
+  surface3: '#251F42',         // input backgrounds
+  surface4: '#332B57',         // subtle borders / hover
+  onSurface: '#FFFFFF',
+  onSurfaceMuted: '#B7B3D0',
+
+  // Brand
+  brand: '#A855F7',            // vibrant purple (primary)
+  brandDark: '#7C3AED',
+  brandSoft: '#2A1F4A',        // muted purple bg (for tinted areas)
   onBrand: '#FFFFFF',
-  onBrandSoft: '#BA131A',
-  accent: '#FFC300',
-  onAccent: '#4D3A00',
-  success: '#00C49A',
-  onSuccess: '#003B2E',
-  warning: '#FFC300',
-  error: '#E63946',
+  onBrandSoft: '#D8B4FE',
+
+  // Accent
+  accent: '#22D3EE',            // cyan — used sparingly for highlights
+  onAccent: '#083344',
+
+  // Status
+  success: '#10B981',
+  onSuccess: '#022C22',
+  warning: '#F59E0B',
+  onWarning: '#3A2400',
+  error: '#F87171',
   onError: '#FFFFFF',
-  info: '#4A4A45',
-  border: '#E5E5DE',
-  borderStrong: '#C2C2B8',
-  divider: '#E5E5DE',
-  muted: '#6B6B63',
+  info: '#B7B3D0',
+  onInfo: '#0F0B1F',
+
+  // Structure
+  border: '#2A2450',
+  borderStrong: '#3D3568',
+  divider: '#231D40',
+  muted: '#8B85AC',
+};
+
+// Gradient stops for hero surfaces / CTAs. Match the infinity logo colours.
+export const gradient = {
+  brand: ['#A855F7', '#22D3EE'] as [string, string],
+  brandDeep: ['#7C3AED', '#06B6D4'] as [string, string],
+  card: ['#1A1533', '#0F0B1F'] as [string, string],
+  hero: ['#251F42', '#0F0B1F'] as [string, string],
 };
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 48 };
-export const radius = { sm: 6, md: 12, lg: 20, pill: 999 };
+export const radius = { sm: 6, md: 12, lg: 20, xl: 28, pill: 999 };
 
 export const font = {
-  // System stack — no external font files required.
   display: 'System',
   text: 'System',
   size: { xs: 11, sm: 12, base: 14, lg: 16, xl: 20, xxl: 24, xxxl: 30 },
-  weight: { regular: '400' as const, medium: '500' as const },
+  weight: { regular: '400' as const, medium: '500' as const, bold: '700' as const },
 };
 
 export const shadow = {
   card: {
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
   soft: {
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  glow: {
+    shadowColor: '#A855F7',
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
 };

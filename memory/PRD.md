@@ -1,4 +1,4 @@
-# CollabSpace — Product Requirements (v1.0 MVP)
+# CollabSpace — Product Requirements (v1.1)
 
 ## Vision
 A trusted two-sided marketplace where **businesses/brands** discover **influencers/content creators** for paid promotions, negotiate through in-app chat, unlock contacts only after a small platform fee, execute campaigns, and rate each other.
@@ -6,40 +6,48 @@ A trusted two-sided marketplace where **businesses/brands** discover **influence
 ## User Roles
 - **Influencer / Creator** — profile with category, region, socials, reach, portfolio, pricing tiers, unlock tier (₹10/₹49/₹99).
 - **Business / Brand** — brand profile, industry, budget, discovery-first UX.
-- **Admin** — moderation, verification, platform analytics.
+- **Admin** — moderation, verification review, platform analytics.
 
 ## Core Flow
 `Discover → View Profile → Send Request → Chat → Negotiate → Pay Contact-Unlock → Exchange Contact → Campaign → Complete → Review`
 
-## Implemented in v1.0
-1. **Auth**: Email/password (bcrypt + opaque session token stored in Mongo `user_sessions` + TTL) **and** Emergent Google Auth (`POST /api/auth/session` exchange).
-2. **Profile management** with role-aware fields (creator: pricing/reach/handles; brand: industry/website).
-3. **Discovery**: multi-facet search (`q`, category, region, platform, min_followers, max_budget, sort by rating/followers/price).
-4. **Rankings/Leaderboard**: top rated creators.
-5. **Collaboration Requests**: pending / accepted / rejected / finalized / paid states; enriched inbox with counterpart snapshots.
-6. **Real-time Chat**: WebSocket at `/api/ws/chat/{conv}?token=<session_token>` with automatic REST fallback (`POST /api/messages`).
-7. **Negotiation Cards**: system/offer messages rendered as distinct tactile modules.
-8. **Contact-Unlock Payment (MOCK Razorpay)**: create-order → verify (any signature accepted in mock mode) → `contact_unlocked=true` → contact revealed via `/api/requests/{id}/contact`. Fee tier: basic ₹10, silver ₹49, gold ₹99.
-9. **Campaigns**: gated on unlock; deliverables, price, deadline, status (`active|delivered|completed|cancelled`), notes.
-10. **Reviews & Rating aggregation**: 1–5 stars + comment; recomputes `rating_avg` and `rating_count` on the reviewee.
-11. **Admin panel**: analytics tiles (users, deals, revenue), user verification, deletion, role filters.
+## Implemented in v1.1 (Feb 2026)
+### v1.0 (baseline)
+- Email/password auth (bcrypt + opaque session token) **and** Emergent Google Auth.
+- Discovery, requests, real-time WebSocket chat, negotiation cards.
+- Contact-unlock payment, campaigns, reviews, admin panel.
 
-## Design
-Personality: **"4 Tactile / Playful LIGHT"** (see `/app/design_guidelines.json`).
-- Palette: Coral `#FF5A5F` primary, Mint `#00C49A` success, Yellow `#FFC300` accent, Light `#FCFCFA` surface.
-- Sticky horizontal chip row, 2-col creator grid with gradient scrim on hero cards.
-- Bottom-tabs (4 max): **Discover · Requests · Chat · Profile**.
+### v1.1 additions
+1. **Verification Badge**  
+   - Creators submit Government ID (photo → Emergent Object Storage) + Instagram/YouTube profile links via `/verification`.  
+   - Admin reviews under `/admin-verifications` — approve sets `user.verified=true`; reject records a reason surfaced to the creator.  
+   - Verified badge (cyan checkmark) shows in Discover creator cards and profile.
+2. **Real Razorpay Integration**  
+   - `POST /api/payments/create-order` uses `razorpay.Order.create()` when `RAZORPAY_KEY_ID` + `RAZORPAY_KEY_SECRET` are set.  
+   - `POST /api/payments/verify` verifies HMAC-SHA256 of `order_id|payment_id` with `RAZORPAY_KEY_SECRET`.  
+   - Automatically falls back to MOCK mode when keys are missing (health endpoint returns `razorpay_live` flag).
+3. **Saved Searches**  
+   - Brands can save the current Discover filter combo (category + region + query) with a name.  
+   - Saved chips appear right below the search bar for one-tap re-use.  
+   - Managed via `/saved-searches` screen.
+4. **Emergent Object Storage**  
+   - Multipart upload endpoint `POST /api/upload` (8MB cap).  
+   - Ownership-gated read via `GET /api/files/{path}` (Bearer or short-lived signed query token).  
+   - Used by the Verification flow; ready for portfolio/attachments.
+5. **Dark navy + purple/cyan theme**  
+   - Matches the CollabSpace infinity logo the user provided.  
+   - Consistent gradient CTAs, glow shadows, glass overlays.
 
 ## Tech
-- **Backend**: FastAPI + Motor (MongoDB) + native WebSocket. Python 3, bcrypt, httpx (for Emergent OAuth exchange). All routes under `/api/*`.
-- **Frontend**: Expo SDK 54 + expo-router (file-based). expo-image, expo-linear-gradient, expo-blur, expo-web-browser, expo-linking, expo-secure-store.
-- **Storage**: MongoDB with indexes on `users.email`, `users.user_id`, `user_sessions.session_token` (unique + TTL).
+- **Backend**: FastAPI + Motor (MongoDB) + native WebSocket + razorpay-python + `requests` (for Emergent Object Storage).
+- **Frontend**: Expo SDK 54 + expo-router + expo-image + expo-image-picker + expo-linear-gradient + expo-blur + expo-web-browser + expo-linking + expo-secure-store.
+- **Storage**: MongoDB with TTL sessions; Emergent Object Storage for user-uploaded photos.
 
 ## Environment
-- Backend: `MONGO_URL`, `DB_NAME`, optional `APP_JWT_SECRET`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` (unused while mock).
-- Frontend: `EXPO_PUBLIC_BACKEND_URL` (proxy handles `/api` and `/api/ws/*`).
+- Backend `/app/backend/.env`: `MONGO_URL`, `DB_NAME`, `EMERGENT_LLM_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, optional `APP_JWT_SECRET`.
+- Frontend `/app/frontend/.env`: `EXPO_PUBLIC_BACKEND_URL` (proxy handles `/api` and `/api/ws/*`).
 
-## Not in v1 (deferred)
-- AI recommendations / campaign matching (explicitly out per user).
-- Real Razorpay gateway (mock stubs ready to swap — just replace two code blocks in `server.py`).
-- Push notifications (only on user request).
+## Deferred
+- AI recommendations / campaign matching.
+- Deal escrow, similar-creators strip (potential v1.2).
+- Push notifications (only on request).

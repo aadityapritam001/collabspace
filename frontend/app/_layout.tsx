@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
+import { colors } from "@/src/theme";
 
 LogBox.ignoreAllLogs(true);
 
@@ -27,11 +28,11 @@ export default function RootLayout() {
   if (!loaded && !error) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.surface }}>
       <SafeAreaProvider>
         <AuthProvider>
-          <StatusBar barStyle="dark-content" />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#FCFCFA' } }} />
+          <StatusBar barStyle="light-content" backgroundColor={colors.surface} />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }} />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

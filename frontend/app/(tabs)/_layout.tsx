@@ -1,6 +1,5 @@
 /**
- * Bottom tabs — 4 max: Discover, Requests, Messages, Profile.
- * We use expo-router's <Tabs> so the same file works on iOS and Android.
+ * Bottom tabs (dark navy). 4-tab max.
  */
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,9 +13,9 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.brand,
         tabBarInactiveTintColor: colors.muted,
         tabBarStyle: {
-          backgroundColor: colors.surface,
+          backgroundColor: colors.surface2,
           borderTopColor: colors.border,
-          height: 62,
+          height: 64,
           paddingTop: 6,
           paddingBottom: 8,
         },

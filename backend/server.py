@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 import uuid
 import json
+import hmac
+import hashlib
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -29,11 +31,14 @@ from typing import List, Optional, Dict, Any
 
 import bcrypt
 import httpx
+import requests
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI, APIRouter, Depends, HTTPException, Header, Request,
-    WebSocket, WebSocketDisconnect, status, Query,
+    WebSocket, WebSocketDisconnect, status, Query, UploadFile, File, Form,
 )
+from fastapi.responses import Response
+from fastapi.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 from starlette.middleware.cors import CORSMiddleware
@@ -51,6 +56,87 @@ DB_NAME = os.environ["DB_NAME"]
 # In production, override these via env. Locally-generated defaults are fine
 # because sessions are opaque server-issued tokens looked up in Mongo.
 JWT_SECRET = os.environ.get("APP_JWT_SECRET", secrets.token_hex(32))
+
+# ---- Razorpay live-mode config (falls back to mock when keys are missing) ----
+RAZORPAY_KEY_ID = (os.environ.get("RAZORPAY_KEY_ID") or "").strip()
+RAZORPAY_KEY_SECRET = (os.environ.get("RAZORPAY_KEY_SECRET") or "").strip()
+RAZORPAY_LIVE = bool(RAZORPAY_KEY_ID) and bool(RAZORPAY_KEY_SECRET)
+if RAZORPAY_LIVE:
+    try:
+        import razorpay  # type: ignore
+        razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    except Exception as _e:  # pragma: no cover — keeps startup robust
+        RAZORPAY_LIVE = False
+        razorpay_client = None
+else:
+    razorpay_client = None
+
+# ---- Emergent Object Storage config ----
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = (os.environ.get("EMERGENT_LLM_KEY") or "").strip()
+APP_NAME = "collabspace"
+_storage_key: Optional[str] = None  # module-level cache
+
+
+def init_storage() -> Optional[str]:
+    """Idempotent init — returns a reusable storage_key. Returns None if disabled."""
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    if not EMERGENT_KEY:
+        return None
+    try:
+        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+        resp.raise_for_status()
+        _storage_key = resp.json().get("storage_key")
+    except Exception as e:
+        logger_early = logging.getLogger("collabspace")
+        logger_early.warning("Object storage init failed: %s", e)
+        _storage_key = None
+    return _storage_key
+
+
+def _reset_storage_key():
+    global _storage_key
+    _storage_key = None
+
+
+def put_object(path: str, data: bytes, content_type: str) -> Dict[str, Any]:
+    key = init_storage()
+    if not key:
+        raise HTTPException(status_code=503, detail="Object storage unavailable")
+    resp = requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data, timeout=120,
+    )
+    if resp.status_code == 503:
+        _reset_storage_key()
+        key = init_storage()
+        resp = requests.put(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key, "Content-Type": content_type},
+            data=data, timeout=120,
+        )
+    if resp.status_code == 402:
+        raise HTTPException(status_code=402, detail="Storage credits exhausted")
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_object(path: str) -> tuple[bytes, str]:
+    key = init_storage()
+    if not key:
+        raise HTTPException(status_code=503, detail="Object storage unavailable")
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    if resp.status_code == 503:
+        _reset_storage_key()
+        key = init_storage()
+        resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=404, detail="File not found")
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("collabspace")
@@ -268,6 +354,10 @@ async def ensure_indexes():
     await db.messages.create_index([("conversation_id", 1), ("created_at", 1)])
     await db.campaigns.create_index("request_id")
     await db.reviews.create_index("campaign_id")
+    await db.verifications.create_index("user_id", unique=True)
+    await db.verifications.create_index("status")
+    await db.saved_searches.create_index("user_id")
+    await db.files.create_index("storage_path", unique=True)
 
 
 async def seed_defaults():
@@ -350,7 +440,15 @@ async def seed_defaults():
 async def _startup():
     await ensure_indexes()
     await seed_defaults()
-    logger.info("CollabSpace API ready — seeded categories/regions/demo users.")
+    # Best-effort — object storage is optional for local dev.
+    try:
+        await run_in_threadpool(init_storage)
+    except Exception as e:
+        logger.warning("Storage init deferred: %s", e)
+    logger.info(
+        "CollabSpace API ready — razorpay_live=%s storage_ready=%s",
+        RAZORPAY_LIVE, bool(EMERGENT_KEY),
+    )
 
 
 @app.on_event("shutdown")
@@ -778,14 +876,14 @@ async def ws_chat(ws: WebSocket, conversation_id: str, token: str):
 
 
 # ---------------------------------------------------------------------------
-# Contact-unlock payment (MOCK Razorpay)
+# Contact-unlock payment (Razorpay — LIVE when keys present, MOCK otherwise)
 # ---------------------------------------------------------------------------
 @api.post("/payments/create-order")
 async def create_order(body: PaymentInitIn, user=Depends(get_current_user)):
-    """Create a MOCK Razorpay order for the contact-unlock fee.
+    """Create a Razorpay order for the contact-unlock fee.
 
-    In production replace the mock block with a real razorpay.Order.create({...})
-    call using RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET from env.
+    Uses the real Razorpay Orders API when RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET
+    are present in env; falls back to a mock order (order_MOCK…) otherwise.
     """
     req = await db.collab_requests.find_one({"request_id": body.request_id}, {"_id": 0})
     if not req:
@@ -798,15 +896,36 @@ async def create_order(body: PaymentInitIn, user=Depends(get_current_user)):
     counterpart = await db.users.find_one({"user_id": counterpart_id}, {"_id": 0})
     tier = (counterpart or {}).get("unlock_tier", "basic")
     amount_inr = UNLOCK_TIER_FEES.get(tier, 10)
+    amount_paise = amount_inr * 100
 
-    # ---- MOCK RAZORPAY ORDER (deterministic-looking id) ----
-    order = {
-        "id": f"order_MOCK{uuid.uuid4().hex[:14]}",
-        "amount": amount_inr * 100,  # paise
-        "currency": "INR",
-        "status": "created",
-        "receipt": body.request_id,
-    }
+    if RAZORPAY_LIVE and razorpay_client is not None:
+        # ---- LIVE Razorpay ----
+        def _create():
+            return razorpay_client.order.create(dict(
+                amount=amount_paise, currency="INR",
+                receipt=body.request_id, payment_capture=1,
+                notes={"request_id": body.request_id, "user_id": user["user_id"]},
+            ))
+        try:
+            rp_order = await run_in_threadpool(_create)
+        except Exception as e:
+            logger.exception("razorpay order.create failed: %s", e)
+            raise HTTPException(status_code=502, detail="Payment gateway error")
+        order = {
+            "id": rp_order["id"], "amount": rp_order["amount"],
+            "currency": rp_order["currency"], "status": rp_order["status"],
+            "receipt": rp_order.get("receipt"),
+        }
+        mock = False
+    else:
+        # ---- MOCK ----
+        order = {
+            "id": f"order_MOCK{uuid.uuid4().hex[:14]}",
+            "amount": amount_paise, "currency": "INR",
+            "status": "created", "receipt": body.request_id,
+        }
+        mock = True
+
     await db.payments.insert_one({
         "order_id": order["id"],
         "request_id": body.request_id,
@@ -814,21 +933,32 @@ async def create_order(body: PaymentInitIn, user=Depends(get_current_user)):
         "amount_inr": amount_inr,
         "status": "created",
         "created_at": now_utc(),
-        "mock": True,
+        "mock": mock,
     })
-    return {"order": order, "amount_inr": amount_inr,
-            "key_id": os.environ.get("RAZORPAY_KEY_ID", "rzp_test_MOCK_KEY")}
+    return {
+        "order": order,
+        "amount_inr": amount_inr,
+        "key_id": RAZORPAY_KEY_ID or "rzp_test_MOCK_KEY",
+        "mock": mock,
+    }
 
 
 @api.post("/payments/verify")
 async def verify_payment(body: PaymentVerifyIn, user=Depends(get_current_user)):
-    """MOCK verification. In production, HMAC-SHA256 the order|payment id and
-    compare with razorpay_signature using RAZORPAY_KEY_SECRET."""
+    """Verify Razorpay HMAC signature (live) or accept any signature (mock)."""
     payment = await db.payments.find_one({"order_id": body.razorpay_order_id}, {"_id": 0})
     if not payment:
         raise HTTPException(status_code=404, detail="Order not found")
     if payment["request_id"] != body.request_id:
         raise HTTPException(status_code=400, detail="Order/request mismatch")
+
+    is_mock = payment.get("mock") or body.razorpay_order_id.startswith("order_MOCK")
+    if not is_mock:
+        # LIVE — HMAC_SHA256(order_id|payment_id, key_secret) must equal signature.
+        payload = f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode()
+        expected = hmac.new(RAZORPAY_KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, body.razorpay_signature):
+            raise HTTPException(status_code=400, detail="Invalid signature")
 
     await db.payments.update_one(
         {"order_id": body.razorpay_order_id},
@@ -839,7 +969,6 @@ async def verify_payment(body: PaymentVerifyIn, user=Depends(get_current_user)):
         {"request_id": body.request_id},
         {"$set": {"contact_unlocked": True, "status": "finalized"}},
     )
-    # Post a system message into the conversation.
     req = await db.collab_requests.find_one({"request_id": body.request_id}, {"_id": 0})
     if req:
         await _persist_message(
@@ -972,7 +1101,7 @@ async def admin_analytics(_=Depends(admin_dep)):
     users_count = await db.users.count_documents({})
     influencers = await db.users.count_documents({"role": "influencer"})
     businesses = await db.users.count_documents({"role": "business"})
-    requests = await db.collab_requests.count_documents({})
+    requests_count = await db.collab_requests.count_documents({})
     finalized = await db.collab_requests.count_documents({"contact_unlocked": True})
     payments = await db.payments.count_documents({"status": "paid"})
     campaigns = await db.campaigns.count_documents({})
@@ -985,7 +1114,7 @@ async def admin_analytics(_=Depends(admin_dep)):
         "users": users_count,
         "influencers": influencers,
         "businesses": businesses,
-        "requests": requests,
+        "requests": requests_count,
         "finalized_deals": finalized,
         "payments": payments,
         "campaigns": campaigns,
@@ -1013,11 +1142,232 @@ async def admin_delete(user_id: str, _=Depends(admin_dep)):
 
 
 # ---------------------------------------------------------------------------
+# Uploads (Emergent Object Storage) + file serving
+# ---------------------------------------------------------------------------
+def _short_lived_file_token(user_id: str) -> str:
+    """A tiny signed token so <img> tags on web can auth via query string."""
+    payload = f"{user_id}|{int(datetime.now(tz=timezone.utc).timestamp())}"
+    sig = hmac.new(JWT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"{payload}|{sig}"
+
+
+def _verify_file_token(token: str) -> Optional[str]:
+    try:
+        uid, ts, sig = token.split("|")
+        payload = f"{uid}|{ts}"
+        expected = hmac.new(JWT_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        if not hmac.compare_digest(expected, sig):
+            return None
+        if datetime.now(tz=timezone.utc).timestamp() - int(ts) > 60 * 60:  # 1 hour
+            return None
+        return uid
+    except Exception:
+        return None
+
+
+@api.post("/upload")
+async def upload_file(file: UploadFile = File(...), user=Depends(get_current_user)):
+    """Multipart upload → object storage. Returns storage path stored on the record."""
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:  # 8MB cap
+        raise HTTPException(status_code=413, detail="File too large (max 8MB)")
+    ext = (file.filename or "bin").rsplit(".", 1)[-1].lower()[:6] or "bin"
+    path = f"{APP_NAME}/uploads/{user['user_id']}/{uuid.uuid4().hex}.{ext}"
+    ct = file.content_type or "application/octet-stream"
+    try:
+        result = await run_in_threadpool(put_object, path, data, ct)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("upload failed: %s", e)
+        raise HTTPException(status_code=500, detail="Upload failed")
+    await db.files.insert_one({
+        "storage_path": result["path"], "owner_id": user["user_id"],
+        "content_type": ct, "size": result.get("size", len(data)),
+        "created_at": now_utc(),
+    })
+    return {
+        "path": result["path"],
+        "url": f"/api/files/{result['path']}",
+        "file_token": _short_lived_file_token(user["user_id"]),
+    }
+
+
+@api.get("/files/{path:path}")
+async def serve_file(path: str, authorization: Optional[str] = Header(default=None),
+                     token: Optional[str] = None):
+    """Serve stored objects, gated by Bearer OR short-lived token query param.
+
+    Ownership check: the requester must be the owner or an admin.
+    """
+    requester_id: Optional[str] = None
+    if authorization and authorization.lower().startswith("bearer "):
+        sess = await db.user_sessions.find_one({"session_token": authorization.split(" ", 1)[1].strip()}, {"_id": 0})
+        if sess:
+            requester_id = sess["user_id"]
+    if not requester_id and token:
+        requester_id = _verify_file_token(token)
+    if not requester_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    record = await db.files.find_one({"storage_path": path}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Not found")
+    requester = await db.users.find_one({"user_id": requester_id}, {"_id": 0})
+    if record["owner_id"] != requester_id and (requester or {}).get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        content, ct = await run_in_threadpool(get_object, path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("get_object failed: %s", e)
+        raise HTTPException(status_code=500, detail="Read failed")
+    return Response(content=content, media_type=ct)
+
+
+# ---------------------------------------------------------------------------
+# Verification — creators submit Government ID + social profile links,
+# admins review and either approve (sets user.verified=true) or reject.
+# ---------------------------------------------------------------------------
+class VerificationIn(BaseModel):
+    id_document_path: str            # storage path returned by /api/upload
+    id_document_type: str = Field(default="government_id")
+    social_links: Dict[str, str]     # {"instagram": "https://...", "youtube": "..."}
+    full_name: str
+    notes: Optional[str] = None
+
+
+class VerificationReviewIn(BaseModel):
+    status: str = Field(pattern="^(approved|rejected)$")
+    reason: Optional[str] = None
+
+
+@api.post("/verifications")
+async def submit_verification(body: VerificationIn, user=Depends(get_current_user)):
+    """Creators submit proof. Overwrites any prior pending/rejected submission."""
+    if user.get("role") != "influencer":
+        raise HTTPException(status_code=403, detail="Only creators can request verification")
+    # Ensure the ID doc belongs to the caller (prevents cross-user references).
+    record = await db.files.find_one({"storage_path": body.id_document_path}, {"_id": 0})
+    if not record or record["owner_id"] != user["user_id"]:
+        raise HTTPException(status_code=400, detail="Invalid document reference")
+
+    existing = await db.verifications.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    doc = {
+        "verification_id": new_id("ver"),
+        "user_id": user["user_id"],
+        "full_name": body.full_name,
+        "id_document_path": body.id_document_path,
+        "id_document_type": body.id_document_type,
+        "social_links": body.social_links,
+        "notes": body.notes,
+        "status": "pending",
+        "review_reason": None,
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "created_at": now_utc(),
+    }
+    if existing:
+        await db.verifications.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {k: v for k, v in doc.items() if k not in ("verification_id",)}},
+        )
+        return {"verification": {**existing, **doc, "verification_id": existing.get("verification_id", doc["verification_id"])}}
+    await db.verifications.insert_one(doc)
+    return {"verification": strip_mongo(doc)}
+
+
+@api.get("/verifications/me")
+async def my_verification(user=Depends(get_current_user)):
+    v = await db.verifications.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {"verification": v}
+
+
+@api.get("/admin/verifications")
+async def list_verifications(status_filter: str = Query("all", pattern="^(all|pending|approved|rejected)$"),
+                             _=Depends(admin_dep)):
+    filt: Dict[str, Any] = {}
+    if status_filter != "all":
+        filt["status"] = status_filter
+    docs = await db.verifications.find(filt, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Enrich with user snapshots
+    ids = list({d["user_id"] for d in docs})
+    users = await db.users.find({"user_id": {"$in": ids}}, {"_id": 0, "password_hash": 0}).to_list(500)
+    umap = {u["user_id"]: u for u in users}
+    for d in docs:
+        d["user"] = umap.get(d["user_id"])
+    return {"verifications": docs}
+
+
+@api.patch("/admin/verifications/{verification_id}")
+async def review_verification(verification_id: str, body: VerificationReviewIn, admin=Depends(admin_dep)):
+    v = await db.verifications.find_one({"verification_id": verification_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.verifications.update_one(
+        {"verification_id": verification_id},
+        {"$set": {
+            "status": body.status,
+            "review_reason": body.reason,
+            "reviewed_by": admin["user_id"],
+            "reviewed_at": now_utc(),
+        }},
+    )
+    # If approved, mark the user as verified — surfaces the badge in Discover.
+    if body.status == "approved":
+        await db.users.update_one({"user_id": v["user_id"]}, {"$set": {"verified": True}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Saved Searches — one-tap filter presets for brands.
+# ---------------------------------------------------------------------------
+class SavedSearchIn(BaseModel):
+    name: str
+    filters: Dict[str, Any]   # {"category": "Fashion", "region": "Mumbai", "max_budget": 50000, "platform": "instagram"}
+
+
+@api.post("/saved-searches")
+async def create_saved_search(body: SavedSearchIn, user=Depends(get_current_user)):
+    doc = {
+        "search_id": new_id("srch"),
+        "user_id": user["user_id"],
+        "name": body.name,
+        "filters": body.filters,
+        "created_at": now_utc(),
+    }
+    await db.saved_searches.insert_one(doc)
+    return {"saved_search": strip_mongo(doc)}
+
+
+@api.get("/saved-searches")
+async def list_saved_searches(user=Depends(get_current_user)):
+    docs = await db.saved_searches.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"saved_searches": docs}
+
+
+@api.delete("/saved-searches/{search_id}")
+async def delete_saved_search(search_id: str, user=Depends(get_current_user)):
+    res = await db.saved_searches.delete_one({"search_id": search_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 @api.get("/")
 async def health():
-    return {"ok": True, "service": "collabspace", "time": now_utc().isoformat()}
+    return {
+        "ok": True,
+        "service": "collabspace",
+        "time": now_utc().isoformat(),
+        "razorpay_live": RAZORPAY_LIVE,
+        "storage_ready": bool(EMERGENT_KEY),
+    }
 
 
 app.include_router(api)

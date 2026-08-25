@@ -75,6 +75,9 @@ export default function AdminPanel() {
             <Text style={[styles.filterText, filter === f && { color: colors.onBrand }]}>{f}</Text>
           </Pressable>
         ))}
+        <Pressable testID="admin-verifications-link" onPress={() => router.push('/admin-verifications')} style={[styles.filterChip, { marginLeft: 'auto', backgroundColor: colors.brand, borderColor: colors.brand }]}>
+          <Text style={{ color: colors.onBrand, fontWeight: '700' }}>Verifications</Text>
+        </Pressable>
       </View>
 
       {loading ? (

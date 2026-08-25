@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#0F0B1F"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.creatorcommerce.x0j67d"
@@ -27,13 +27,14 @@
     },
     "plugins": [
       "expo-router",
+      "expo-image-picker",
       [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#0F0B1F"
         }
       ]
     ],
