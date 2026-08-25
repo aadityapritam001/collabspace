@@ -1,0 +1,168 @@
+{
+  "app_name": "CollabSpace",
+  "personality": "4 Tactile / Playful LIGHT",
+  "personality_one_liner": "A vibrant, approachable creator-economy marketplace blending tactile cards, expressive shapes, and energetic colors to make brand collaborations feel exciting and natural.",
+  "color": {
+    "surface": "#FCFCFA",
+    "onSurface": "#171714",
+    "surfaceSecondary": "#F2F2ED",
+    "onSurfaceSecondary": "#3A3A35",
+    "surfaceTertiary": "#E5E5DE",
+    "onSurfaceTertiary": "#171714",
+    "surfaceInverse": "#171714",
+    "onSurfaceInverse": "#FCFCFA",
+    "brand": "#FF5A5F",
+    "brandPrimary": "#FF5A5F",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FFC300",
+    "onBrandSecondary": "#171714",
+    "brandTertiary": "#FFE1E2",
+    "onBrandTertiary": "#BA131A",
+    "success": "#00C49A",
+    "onSuccess": "#003B2E",
+    "warning": "#FFC300",
+    "onWarning": "#4D3A00",
+    "error": "#E63946",
+    "onError": "#FFFFFF",
+    "info": "#4A4A45",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E5DE",
+    "borderStrong": "#C2C2B8",
+    "divider": "#E5E5DE"
+  },
+  "typography": {
+    "displayFontFamily": "Figtree",
+    "textFontFamily": "Nunito",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous spacing. Make the interface feel touchable with chunky cards and oversized tap areas. Use controlled asymmetry (e.g. staggered chips) to create energy.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "2",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Apply to sticky headers over scrolling content",
+      "Apply to bottom tab bar when content scrolls behind it",
+      "Apply to the Floating Action Button (FAB) or sticky bottom CTAs",
+      "Use as a premium overlay for the 'Contact Unlock' payment gate"
+    ],
+    "dont's": [
+      "Do not apply glass to every button or list row",
+      "Do not apply to form inputs or body text regions"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Discover (Home)",
+      "purpose": "Allow businesses to find creators through curated categories, filter chips, and visually heavy influencer cards.",
+      "states": {
+        "loading": "Grid of rounded skeleton cards with subtle pulsing animation.",
+        "empty": "Playful illustration of a magnifying glass with 'No creators found in this niche' and a primary CTA to clear filters.",
+        "error": "Friendly error message 'Oops, feed got tangled' with a Retry button."
+      },
+      "layout": "Sticky top horizontal scroll for category filter chips. Main content area is a 2-column grid (`flexWrap: 'wrap'`, `justifyContent: 'space-between'`) for creator cards. Each card features a full-bleed photo with a top-to-bottom gradient scrim (transparent to 80% surfaceInverse) to ensure the white text (name, niche, rating) at the bottom is highly readable. Use a sticky bottom tab bar with a glass effect."
+    },
+    {
+      "name": "Creator Profile",
+      "purpose": "Act as a 'link-in-bio' style showcase of the creator's audience, pricing tiers, and portfolio to drive collaboration requests.",
+      "states": {
+        "loading": "Large skeleton block for the hero banner and stacked skeleton pills for metrics.",
+        "empty": "Not applicable (data-driven screen).",
+        "error": "Error message with a 'Go Back' CTA."
+      },
+      "layout": "Large full-bleed hero photo banner at the top. The avatar overlaps the bottom edge of the banner (controlled asymmetry). Below, display scannable metric pills (followers, engagement) grouped playfully. Service tiers (Posts, Reels) are displayed as chunky tactile cards (`surfaceSecondary` with shadow 2). Pinned at the very bottom is a sticky 'Send Request' primary CTA inside a glass container."
+    },
+    {
+      "name": "Collaboration Chat & Negotiation",
+      "purpose": "Manage the back-and-forth negotiation, deliverables, and payment unlock flow directly within a real-time message stream.",
+      "states": {
+        "loading": "Skeleton chat bubbles.",
+        "empty": "Illustration of two speech bubbles 'Say hi and pitch your idea!'",
+        "error": "Error banner at the top of the chat."
+      },
+      "layout": "Standard chat timeline layout but injected with custom 'Negotiation Cards' (large tactile modules showing price, deliverables, status) so offers don't get lost in text. When contact details are locked, a tactile glassmorphism overlay dims the specific message and prompts the ₹49 contact-unlock payment via Razorpay. Sticky bottom chat input."
+    },
+    {
+      "name": "Campaign Dashboard",
+      "purpose": "Track active collaborations, deadlines, upload deliverables, and manage reviews.",
+      "states": {
+        "loading": "Stacked skeleton cards.",
+        "empty": "Playful illustration of an empty clipboard 'No active campaigns yet' + CTA 'Discover Creators'.",
+        "error": "Friendly error message and Retry button."
+      },
+      "layout": "Segmented control at the top (Active, Completed) using a pill shape. Below, a list of large stacked tactile cards. Each card displays campaign progress bars, due dates, and a brand/creator avatar. Uses soft rounded corners and generous padding."
+    }
+  ],
+  "images": {
+    "influencer_fashion_hero": {
+      "url": "https://images.unsplash.com/photo-1632149877166-f75d49000351?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwxfHxmYXNoaW9uJTIwY3JlYXRvciUyMGxpZmVzdHlsZXxlbnwwfHx8fDE3ODc2NTA4Mjh8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Fashion creator posing in a white coat"
+    },
+    "influencer_fitness_hero": {
+      "url": "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwxfHxmaXRuZXNzJTIwaW5mbHVlbmNlciUyMHdvcmtpbmclMjBvdXR8ZW58MHx8fHwxNzg3NjUwODI4fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Fitness influencer performing sit-ups indoors"
+    },
+    "influencer_tech_hero": {
+      "url": "https://images.pexels.com/photos/12712506/pexels-photo-12712506.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Tech reviewer unboxing a gadget in a studio"
+    },
+    "brand_nike_logo": {
+      "url": "https://images.unsplash.com/photo-1608541737042-87a12275d313?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzV8MHwxfHNlYXJjaHwxfHxOaWtlJTIwbG9nbyUyMHBuZ3xlbnwwfHx8fDE3ODc2NTA4Mjh8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Nike swoosh logo"
+    },
+    "brand_sephora_logo": {
+      "url": "https://images.pexels.com/photos/33437125/pexels-photo-33437125.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Sephora storefront"
+    }
+  },
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "tab_change": "selection",
+    "filter_chip_toggle": "impactLight",
+    "negotiation_offer_sent": "notificationSuccess",
+    "payment_success": "notificationSuccess"
+  },
+  "instructions_to_main_agent": [
+    "Follow the '4 Tactile / Playful LIGHT' personality strictly. Do not use generic corporate SaaS layouts. Make it feel approachable and creator-friendly.",
+    "Never use indigo, violet, purple, or ANY shade of blue (including sky or navy) per the NO-TOLERANCE rule. Stick to the Coral, Mint, and Yellow accents provided.",
+    "Implement the gradient scrim pattern (transparent to 80% surfaceInverse) on ALL hero images and creator cards to ensure text overlay is perfectly readable.",
+    "Every icon must use the Phosphor set with a consistent filled or outlined style per screen. Weight cap is strictly 500 for all typography (Figtree and Nunito) - never use bold or semi-bold.",
+    "Implement the 'Negotiation Cards' within the chat timeline as distinct tactile modules, differentiating them from regular chat text bubbles.",
+    "Always pin the primary CTA (e.g., 'Send Request') at the bottom of scrolling content using a fixed container with safe-area padding and a glass background.",
+    "Design the ₹49 Contact Unlock feature as an inline premium glassmorphism overlay inside the chat when the user attempts to view locked details."
+  ]
+}
